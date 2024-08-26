@@ -59,11 +59,16 @@ for filename in DATA_FILES_W_COLNAMES:
         mode="overwrite",
     )
 
-for dir in PACKAGING_DATASETS:
-    table = parquet.ParquetDataset(path_or_paths=dir).read()
-    ldb.create_table(
-        name=f"{dir.replace('/','.')}",
-        data=table,
-        schema=table.schema,
+for data_dir in PACKAGING_DATASETS:
+    # create a table based on dataset
+    table = ldb.create_table(
+        name=f"{data_dir.replace('/','.')}",
+        schema=parquet.ParquetDataset(path_or_paths=data_dir).schema,
         mode="overwrite",
     )
+    # iteratively add arrow data from parquet dataset
+    for parquet_file in pathlib.Path(data_dir).glob("*.parquet"):
+        table.add(data=parquet.read_table(parquet_file))
+
+        # remove the parquet file after it has been added to the table
+        pathlib.Path(parquet_file).unlink()

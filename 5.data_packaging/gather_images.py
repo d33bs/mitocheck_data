@@ -7,7 +7,9 @@ import pathlib
 import warnings
 from ftplib import FTP
 from typing import List
+from functools import partial
 
+from joblib import Parallel, delayed
 import docker
 import duckdb
 import h5py
@@ -124,7 +126,7 @@ def get_image_union_table() -> pa.Table:
             FROM locations_union
             LEFT JOIN read_csv('1.idr_streams/stream_files/idr0013-screenA-plates-w-colnames.tsv') as plates ON
                     plates.Plate = locations_union.Plate
-            LIMIT 1;
+            LIMIT 4;
             """
         ).arrow()
 
@@ -418,11 +420,36 @@ export_dir = "./5.data_packaging/location_and_ch5_frame_image_data"
 pathlib.Path(export_dir).mkdir(parents=True, exist_ok=True)
 
 # get a table of image-relevant data
-table = get_image_union_table()
+image_union_table = get_image_union_table()
 
-# iterate through location union data
-for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
 
+def export_frame_data_to_parquet(
+    unique_file: str, image_union_table: pa.Table, export_dir: str
+) -> str:
+    """
+    Extracts frame data from a ch5 file, processes it, and exports the data to a Parquet file.
+
+    This function downloads a ch5 file from a specified location, extracts frames based on
+    data in an image union table, processes the frames to create TIFF files, and then writes
+    the processed data to a Parquet file. The TIFF files and ch5 file are removed after processing.
+
+    Args:
+        unique_file (str):
+            The FTP path to the ch5 file to be downloaded and processed.
+        image_union_table (pa.Table):
+            A PyArrow Table containing metadata and frame information.
+        export_dir (str):
+            The directory where the Parquet file will be saved.
+
+    Returns:
+        str:
+            The path to the exported Parquet file.
+
+    Notes:
+        - The function processes frames for both normal and IC (Image Calibration) frames.
+        - Temporary TIFF files and the downloaded ch5 file are deleted after the Parquet
+          file is created (images and related data are stored in parquet).
+    """
     # download the ch5 file
     local_ch5_file = retrieve_ftp_file(
         ftp_file=unique_file, download_dir=image_download_dir
@@ -432,8 +459,8 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
     movie_length = find_frame_len(ch5_file=local_ch5_file)
 
     # reference rows with the same ch5 file
-    for batch in table.filter(
-        pc.equal(table["IDR_FTP_ch5_location"], unique_file)
+    for batch in image_union_table.filter(
+        pc.equal(image_union_table["IDR_FTP_ch5_location"], unique_file)
     ).to_batches(max_chunksize=1):
 
         # convert to a dictionary for the row, where the dictionary
@@ -513,12 +540,31 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
         parquet.write_table(
             # create a table from the row batches
             table=pa.Table.from_batches(rows),
-            where=f"{export_dir}/{pathlib.Path(local_ch5_file).stem}.frame_{row['Frames'][0]}.parquet",
+            where=(
+                export_path := f"{export_dir}/{pathlib.Path(local_ch5_file).stem}.frame_{row['Frames'][0]}.parquet"
+            ),
         )
 
         # remove the tiff files as we no longer need them
-        """for tiff in frames_to_tiffs.values():
-            pathlib.Path(tiff).unlink()"""
+        for tiff in frames_to_tiffs.values():
+            pathlib.Path(tiff).unlink()
 
     # remove the ch5 file as we no longer need it
-    # pathlib.Path(local_ch5_file).unlink()
+    pathlib.Path(local_ch5_file).unlink()
+
+    return export_path
+
+
+export_frame_data_to_parquet_with_defaults = partial(
+    export_frame_data_to_parquet,
+    image_union_table=image_union_table,
+    export_dir=export_dir,
+)
+
+# iterate through location union data in parallel
+results = Parallel(n_jobs=5)(
+    delayed(export_frame_data_to_parquet_with_defaults)(unique_file)
+    for unique_file in pc.unique(image_union_table["IDR_FTP_ch5_location"]).to_pylist()
+)
+
+print(f"Created {len(results)} parquet files with image data.")

@@ -18,6 +18,8 @@ docker = "^7.0.0"
 h5py = "^3.11.0"
 pybasic = { git = "https://github.com/WayScience/BaSiCPy.git", branch="mitocheck_data" }
 scikit-image = "^0.23.2"
+joblib = "^1.4.2"
+jupyter = "^1.0.0"
 
 [tool.poe.tasks.package_data]
 # run a task to package data

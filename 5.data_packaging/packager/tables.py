@@ -6,6 +6,7 @@ import duckdb
 import pandas as pd
 import pyarrow as pa
 
+
 def get_arrow_tbl_from_csv(filename_read: str) -> str:
     """
     Get an Arrow table from a CSV file through DuckDB.
@@ -37,6 +38,7 @@ def get_arrow_tbl_from_csv(filename_read: str) -> str:
         )
     except:
         raise
+
 
 def write_schema_str_to_file(filename_write: str, schema: str) -> str:
     """
@@ -84,7 +86,3 @@ def get_arrow_schema_str_from_csv(filename_read: str) -> str:
         ).schema.to_string()
     except:
         raise
-
-
-
-

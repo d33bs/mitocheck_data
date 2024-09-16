@@ -16,7 +16,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pybasic
 import skimage
-from constants import (
+from .constants import (
     DOCKER_PLATFORM,
     FTP_IDR_MITOCHECK_CH5_DIR,
     FTP_IDR_URL,

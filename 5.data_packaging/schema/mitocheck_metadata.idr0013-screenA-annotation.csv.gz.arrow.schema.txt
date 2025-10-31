@@ -53,7 +53,7 @@ Score - migration (distance) (automatic): double
 Score - increased proliferation (automatic): double
 siRNA phenotype reproducibility - nuclei stay close together (manual): string
 siRNA phenotype reproducibility - strange nuclear shape (manual): string
-siRNA phenotype reproducibility - segregation problems/chromatin bridges/lagging chromosomes/multiple DNA masses (manual): string
+siRNA phenotype reproducibility - segregation problems/chromatin bridges/lagging chromosomes/multipl (... 21 chars omitted): string
 siRNA phenotype reproducibility - cell migration (manual): double
 siRNA phenotype reproducibility - metaphase delay/arrest (manual): string
 siRNA phenotype reproducibility - cell death (manual): double
@@ -61,7 +61,7 @@ siRNA phenotype reproducibility - metaphase alignment problems/including no meta
 siRNA phenotype reproducibility - pulsating nuclei (manual): double
 siRNA phenotype reproducibility - small nucleus (manual): double
 siRNA phenotype reproducibility - prometaphase delay/arrest (manual): string
-siRNA phenotype reproducibility - condensation followed by decondensation without completion of mitosis (manual): string
+siRNA phenotype reproducibility - condensation followed by decondensation without completion of mito (... 12 chars omitted): string
 siRNA phenotype reproducibility - large nucleus (manual): double
 siRNA phenotype reproducibility - failure in decondensation (manual): string
 siRNA phenotype reproducibility - condensation without mitosis/collapse of nucleus (manual): double
@@ -142,4 +142,4 @@ Phenotype 18: string
 Phenotype 18 Term Name: string
 Phenotype 18 Term Accession: string
 -- schema metadata --
-pandas: '{"index_columns": [{"kind": "range", "name": null, "start": 0, "' + 23696
+pandas: '{"index_columns": [{"kind": "range", "name": null, "start": 0, "' + 23714

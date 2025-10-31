@@ -7,7 +7,11 @@ import pathlib
 import warnings
 from ftplib import FTP
 from typing import List
-
+import imageio.v3 as iio
+from datetime import datetime, timezone
+from serpula_rasa.image import make_ome_arrow_row
+from serpula_rasa.meta import OME_ARROW_SCHEMA
+import subprocess
 import docker
 import duckdb
 import h5py
@@ -24,6 +28,16 @@ from constants import (
 )
 from pyarrow import parquet
 
+OME_STRUCT_TYPE = OME_ARROW_SCHEMA.field(0).type
+
+def to_float01(img: np.ndarray) -> np.ndarray:
+    if img.dtype in (np.float32, np.float64):
+        return np.clip(img.astype(np.float32, copy=False), 0.0, 1.0)
+    img = img.astype(np.float32, copy=False)
+    maxv = float(np.iinfo(img.dtype).max) if np.issubdtype(img.dtype, np.integer) else float(img.max() or 1.0)
+    if maxv != 0:
+        img /= maxv
+    return np.clip(img, 0.0, 1.0)
 
 def retrieve_ftp_file(
     ftp_file: str,
@@ -31,6 +45,9 @@ def retrieve_ftp_file(
     ftp_url: str = FTP_IDR_URL,
     ftp_user: str = FTP_IDR_USER,
     ftp_pass: str = "",
+    *,
+    retries: int = 2,
+    timeout: int = 60,
 ) -> str:
     """
     Retrieve a file using FTP.
@@ -51,28 +68,51 @@ def retrieve_ftp_file(
         str:
             A string indicating the path to the downloaded file.
     """
+    download_dir_path = pathlib.Path(download_dir)
+    download_dir_path.mkdir(parents=True, exist_ok=True)
+    download_filepath = download_dir_path / pathlib.Path(ftp_file).name
 
-    # Specify the file to download
-    download_filepath = f"{download_dir}/{pathlib.Path(ftp_file).name}"
+    if download_filepath.is_file() and download_filepath.stat().st_size > 0:
+        return str(download_filepath)
 
-    # if we don't already have the file, download it
-    if not pathlib.Path(download_filepath).is_file():
+    last_err = None
+    for attempt in range(retries + 1):
         try:
-            # Connect to the FTP server
-            with FTP(ftp_url) as ftp:
-                # Log in to the FTP server
+            with FTP(ftp_url, timeout=timeout) as ftp:
                 ftp.login(user=ftp_user, passwd=ftp_pass)
 
-                # Open a local file for writing in binary mode
-                with open(download_filepath, "wb") as local_file:
-                    # Download the file from the FTP server
-                    ftp.retrbinary(f"RETR {ftp_file}", local_file.write)
+                # Some servers prefer RETR with cwd; try full path first, then cwd+RETR basename
+                try:
+                    with open(download_filepath, "wb") as local_file:
+                        ftp.retrbinary(f"RETR {ftp_file}", local_file.write)
+                except Exception:
+                    # fallback: cwd then retr basename
+                    parent = str(pathlib.Path(ftp_file).parent).lstrip("/")
+                    basename = pathlib.Path(ftp_file).name
+                    if parent and parent != ".":
+                        ftp.cwd(parent)
+                    with open(download_filepath, "wb") as local_file:
+                        ftp.retrbinary(f"RETR {basename}", local_file.write)
 
+            # verify we really got it
+            if download_filepath.is_file() and download_filepath.stat().st_size > 0:
+                return str(download_filepath)
+
+            last_err = RuntimeError("Downloaded file is empty")
         except Exception as e:
-            print("An error occurred:", e)
+            last_err = e
 
-    # return the download filepath
-    return download_filepath
+    # clean up a zero-byte stub if created
+    try:
+        if download_filepath.exists() and download_filepath.stat().st_size == 0:
+            download_filepath.unlink()
+    except Exception:
+        pass
+
+    raise FileNotFoundError(
+        f"Failed to download {ftp_file} from {ftp_url} → {download_filepath} "
+        f"after {retries+1} attempt(s): {last_err}"
+    )
 
 
 def get_image_union_table() -> pa.Table:
@@ -124,6 +164,7 @@ def get_image_union_table() -> pa.Table:
             FROM locations_union
             LEFT JOIN read_csv('1.idr_streams/stream_files/idr0013-screenA-plates-w-colnames.tsv') as plates ON
                     plates.Plate = locations_union.Plate
+            LIMIT 4;
             """
         ).arrow()
 
@@ -159,12 +200,31 @@ def run_dockerfile_container(
     client = docker.from_env()
 
     # Build the Docker image using the Dockerfile
-    client.images.build(
-        path=str(pathlib.Path(dockerfile).parent),
-        dockerfile=pathlib.Path(dockerfile).name,
-        tag=image_name,
-        platform=DOCKER_PLATFORM,
+    # Check if the image already exists
+    check = subprocess.run(
+        ["docker", "image", "inspect", image_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
+
+    if check.returncode == 0:
+        print(f"✅ Image '{image_name}' already exists — skipping build.")
+    else:
+        print(f"🛠️  Image '{image_name}' not found — building now...")
+        subprocess.run(
+            [
+                "docker", "buildx", "build",
+                "--platform", DOCKER_PLATFORM,
+                "--load",
+                "--pull",
+                "--no-cache",
+                "-t", image_name,
+                "-f", pathlib.Path(dockerfile).name,
+                ".",
+            ],
+            check=True,
+            cwd=str(pathlib.Path(dockerfile).parent),
+        )
 
     # Run a container based on the built image, mounting a local directory
     container = client.containers.run(
@@ -478,43 +538,80 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
             destination_filename=(
                 f"{image_download_dir}/"
                 + row["DNA_dotted_notation"][0].replace(
-                    f"_{target_frame}.tif", f"_{target_frame}_IC.tif"
+                    f"_{target_frame}.tif", f"_{target_frame}_IC_TARGET.tif"
                 )
             ),
         )
 
         # create record batches from the frames_to_tiffs
-        rows = [
-            pa.RecordBatch.from_pydict(
-                # retain data from original row if our frame matches the original
-                {
-                    **row,
-                    "Frame_tiff": [read_image_as_binary(image_path=frame_tiff)],
-                }
-                if row["Frames"][0] == str(frame_number)
-                # otherwise, create new rows with relevant IC-focused frame data
-                else {
-                    **row,
-                    "Frames": [str(frame_number)],
-                    "DNA_dotted_notation": [frame_tiff],
-                    "Frame_type": (
-                        ["IC_FRAME"]
-                        if "_IC" not in frame_number
-                        else ["IC_TARGET_FRAME"]
-                    ),
-                    "Frame_tiff": [read_image_as_binary(image_path=frame_tiff)],
-                }
+        pylist_rows = []  # switch to pylist; simpler than many small RecordBatches
+
+        for frame_number, frame_tiff in frames_to_tiffs.items():
+            # Load the image for this frame (keep dtype; choose channel if needed)
+            img = iio.imread(frame_tiff)
+            if img.ndim == 3 and img.shape[-1] in (2, 3, 4):
+                # choose a channel if multichannel; adjust if your frames are known to be single-channel
+                img_for_struct = img[..., 0]
+            else:
+                img_for_struct = img
+
+            # (optional) normalize to float in [0,1] if your downstream expects it
+            # img_for_struct = to_float01(img_for_struct)
+
+            # Build the OME-Arrow struct (name/id fields are up to you)
+            ome_struct = make_ome_arrow_row(
+                image_id=f"{pathlib.Path(local_ch5_file).stem}__{frame_number}",
+                col_name="ome-arrow_original",
+                name=pathlib.Path(frame_tiff).name,
+                pixels=img_for_struct,
+                physical_size_xy_um=0.108,        # put your real XY
+                physical_size_z_um=1.0,           # put your real Z
+                physical_unit="µm",
+                prefer_dimension_order_xyzct=False,  # frames are 2D → XY* hint
+                acquisition_dt=datetime.now(timezone.utc),
             )
-            for frame_number, frame_tiff in frames_to_tiffs.items()
-        ]
 
-        # write a table with the row baches
+            base_row = {k: (v[0] if isinstance(v, list) else v) for k, v in row.items()}
+
+            # Preserve your existing logic about “matching the original row” vs “IC frame”
+            if str(frame_number) == str(base_row["Frames"]):
+                new_row = {
+                    **base_row,
+                    "Frames": str(frame_number),
+                    "DNA_dotted_notation": frame_tiff,
+                    "Frame_type": "IC_FRAME" if "_IC" not in frame_number else "IC_TARGET_FRAME",
+                    "ome-arrow_original": ome_struct["ome-arrow_original"],
+                }
+            else:
+                new_row = {
+                    **base_row,
+                    "Frames": str(frame_number),
+                    "DNA_dotted_notation": frame_tiff,
+                    "Frame_type": "IC_FRAME" if "_IC" not in frame_number else "IC_TARGET_FRAME",
+                    "ome-arrow_original": ome_struct["ome-arrow_original"],
+                }
+            pylist_rows.append(new_row)
+
+        # Build a table with a fixed schema that includes the OME struct column.
+        # If you know all your other field types, declare them here too; otherwise let Arrow infer,
+        # but force the struct to use OME_STRUCT_TYPE so batches stay compatible.
+        # Build the table letting Arrow infer all non-OME fields
+        out_tbl = pa.Table.from_pylist(pylist_rows)
+
+        # Force the OME struct to the canonical type (so batches stay compatible)
+        if "ome-arrow_original" in out_tbl.column_names:
+            idx = out_tbl.column_names.index("ome-arrow_original")
+            out_tbl = out_tbl.set_column(
+                idx,
+                pa.field("ome-arrow_original", OME_STRUCT_TYPE),
+                out_tbl["ome-arrow_original"].cast(OME_STRUCT_TYPE),
+            )
+
+        # Use the scalar target_frame you computed earlier for naming
         parquet.write_table(
-            # create a table from the row batches
-            table=pa.Table.from_batches(rows),
-            where=f"{export_dir}/{pathlib.Path(local_ch5_file).stem}.frame_{row['Frames'][0]}.parquet",
+            out_tbl,
+            f"{export_dir}/{pathlib.Path(local_ch5_file).stem}.frame_{target_frame}.parquet",
         )
-
         # remove the tiff files as we no longer need them
         """for tiff in frames_to_tiffs.values():
             pathlib.Path(tiff).unlink()"""

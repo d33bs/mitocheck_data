@@ -21,6 +21,7 @@ scikit-image = ">=0.23.2"
 serpula_rasa = { git = "https://github.com/WayScience/serpula_rasa.git", branch="main" }
 imageio = "^2.37.0"
 jupyterlab = "^4.4.10"
+jupytext = "^1.18.1"
 
 [tool.poe.tasks.package_data]
 # run a task to package data
@@ -39,3 +40,6 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.setuptools_scm]
+
+[tool.jupytext]
+formats = "ipynb,py:light"

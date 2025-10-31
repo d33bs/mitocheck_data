@@ -164,7 +164,6 @@ def get_image_union_table() -> pa.Table:
             FROM locations_union
             LEFT JOIN read_csv('1.idr_streams/stream_files/idr0013-screenA-plates-w-colnames.tsv') as plates ON
                     plates.Plate = locations_union.Plate
-            LIMIT 4;
             """
         ).arrow()
 

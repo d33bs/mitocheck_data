@@ -131,10 +131,10 @@ def get_image_union_table() -> pa.Table:
             WITH locations_union AS (
                 SELECT *
                 FROM read_csv('0.locate_data/locations/negative_control_locations.tsv')
-                UNION ALL
+                UNION ALL BY NAME
                 SELECT *
                 FROM read_csv('0.locate_data/locations/positive_control_locations.tsv')
-                UNION ALL
+                UNION ALL BY NAME
                 SELECT *
                 FROM read_csv('0.locate_data/locations/training_locations.tsv')
             )

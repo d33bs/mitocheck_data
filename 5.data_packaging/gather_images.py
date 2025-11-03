@@ -137,6 +137,13 @@ def get_image_union_table() -> pa.Table:
                 UNION ALL BY NAME
                 SELECT *
                 FROM read_csv('0.locate_data/locations/training_locations.tsv')
+            ),
+            target_frames AS (
+                /* get target frames from the mitocheck features data to align
+                on filtering of specific frames (not all frames appear to align with movies).*/
+                SELECT
+                    Metadata_DNA
+                FROM read_csv('2.format_training_data/results/training_data__ic.csv.gz')
             )
             /* join locations with additional plate location data */
             SELECT
@@ -159,11 +166,12 @@ def get_image_union_table() -> pa.Table:
                     format('{{:03d}}', locations_union."Well Number"),
                     '_01.ch5'
                 ) AS IDR_FTP_ch5_location,
-                'TARGET_FRAME' as Frame_type,
-                ''::BLOB as Frame_tiff
+                'TARGET_FRAME' as Frame_type
             FROM locations_union
             LEFT JOIN read_csv('1.idr_streams/stream_files/idr0013-screenA-plates-w-colnames.tsv') as plates ON
                     plates.Plate = locations_union.Plate
+            /* only include frames which were used in original downstream analysis */
+            WHERE locations_union.DNA IN (SELECT Metadata_DNA FROM target_frames)
             """
         ).arrow()
 

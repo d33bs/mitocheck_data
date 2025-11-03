@@ -137,13 +137,6 @@ def get_image_union_table() -> pa.Table:
                 UNION ALL BY NAME
                 SELECT *
                 FROM read_csv('0.locate_data/locations/training_locations.tsv')
-            ),
-            target_frames AS (
-                /* get target frames from the mitocheck features data to align
-                on filtering of specific frames (not all frames appear to align with movies).*/
-                SELECT
-                    Metadata_DNA
-                FROM read_csv('2.format_training_data/results/training_data__ic.csv.gz')
             )
             /* join locations with additional plate location data */
             SELECT
@@ -170,8 +163,6 @@ def get_image_union_table() -> pa.Table:
             FROM locations_union
             LEFT JOIN read_csv('1.idr_streams/stream_files/idr0013-screenA-plates-w-colnames.tsv') as plates ON
                     plates.Plate = locations_union.Plate
-            /* only include frames which were used in original downstream analysis */
-            WHERE locations_union.DNA IN (SELECT Metadata_DNA FROM target_frames)
             """
         ).arrow()
 
@@ -379,7 +370,8 @@ def get_ic_context_frames(target_frame: int, movie_len: int) -> List[int]:
 
     # "sandwich" the frames using one frame before and one frame after
     # the target frame provided from frame_num.
-    if target_frame + 1 <= movie_len:
+    # note: we zero index the movie length here for comparisons.
+    if target_frame + 1 <= movie_len - 1:
         return [target_frame - 1, target_frame, target_frame + 1]
 
     # else if we have the first frame, use two frames after

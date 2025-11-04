@@ -482,9 +482,12 @@ table = get_image_union_table()
 for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
 
     # download the ch5 file
-    local_ch5_file = retrieve_ftp_file(
-        ftp_file=unique_file, download_dir=image_download_dir
-    )
+    if not pathlib.Path((filename := f"{image_download_dir}/{pathlib.Path(unique_file).name}")).is_file():
+        local_ch5_file = retrieve_ftp_file(
+            ftp_file=unique_file, download_dir=image_download_dir
+        )
+    else:
+        local_ch5_file = filename
 
     # find the movie length
     movie_length = find_frame_len(ch5_file=local_ch5_file)
@@ -506,19 +509,20 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
         frames_to_tiffs = {
             # for each frame, extract a tiff from the ch5
             str(frame): get_frame_tiff_from_idr_ch5(
-                frame=frame,
+                # note: we zero index the frame for bfconvert
+                frame=frame - 1,
                 local_ch5_file=local_ch5_file,
-                local_frame_tif=(
-                    f"{image_download_dir}/"
-                    + row["DNA_dotted_notation"][0].replace(
-                        f"_{target_frame}.tif", f"_{frame}.tif"
-                    )
-                ),
+                local_frame_tif=img_name,
             )
             # gather all frames based on a target frame
             for frame in get_ic_context_frames(
                 target_frame=target_frame, movie_len=movie_length
             )
+            if not pathlib.Path( img_name :=
+                    f"{image_download_dir}/"
+                    + row["DNA_dotted_notation"][0].replace(
+                        f"_{target_frame}.tif", f"_{frame}.tif"
+                    )).is_file()
         }
 
         # read the tiffs as arrays for use with pybasic

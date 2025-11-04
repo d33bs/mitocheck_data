@@ -512,17 +512,15 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
                 # note: we zero index the frame for bfconvert
                 frame=frame - 1,
                 local_ch5_file=local_ch5_file,
-                local_frame_tif=img_name,
+                local_frame_tif=f"{image_download_dir}/"
+                    + row["DNA_dotted_notation"][0].replace(
+                        f"_{target_frame}.tif", f"_{frame}.tif"
+                    ),
             )
             # gather all frames based on a target frame
             for frame in get_ic_context_frames(
                 target_frame=target_frame, movie_len=movie_length
             )
-            if not pathlib.Path( img_name :=
-                    f"{image_download_dir}/"
-                    + row["DNA_dotted_notation"][0].replace(
-                        f"_{target_frame}.tif", f"_{frame}.tif"
-                    )).is_file()
         }
 
         # read the tiffs as arrays for use with pybasic

@@ -7,6 +7,7 @@ import pathlib
 import warnings
 from ftplib import FTP
 from typing import List
+import time
 import imageio.v3 as iio
 from datetime import datetime, timezone
 from serpula_rasa.image import make_ome_arrow_row
@@ -389,7 +390,8 @@ def pybasic_IC_target_frame_to_tiff(
     frames_as_arrays: List[np.ndarray], target_frame: int, destination_filename: str
 ):
     """
-    PyBaSiC Illumination correction as described in http://www.nature.com/articles/ncomms14836
+    PyBaSiC Illumination correction as described in:
+    http://www.nature.com/articles/ncomms14836
 
     Parameters
     ----------
@@ -407,18 +409,31 @@ def pybasic_IC_target_frame_to_tiff(
     str
         filepath with the IC image as tiff
     """
+    print(f"[INFO] Starting PyBaSiC illumination correction")
+    print(f"       Number of frames provided: {len(frames_as_arrays)}")
+    print(f"       Target frame index: {target_frame}")
+    print(f"       Destination file: {destination_filename}")
+    start_time = time.time()
+
     # capture pybasic warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+
+        print("[STEP] Estimating flatfield and darkfield components...")
         flatfield, darkfield = pybasic.basic(
             frames_as_arrays, darkfield=True, verbosity=False
         )
+        print(f"       Flatfield shape: {np.shape(flatfield)}, Darkfield shape: {np.shape(darkfield)}")
+
+        print("[STEP] Estimating background timelapse...")
         baseflour = pybasic.background_timelapse(
             images_list=frames_as_arrays,
             flatfield=flatfield,
             darkfield=darkfield,
             verbosity=False,
         )
+
+        print("[STEP] Correcting illumination across frames...")
         brightfield_images_corrected_original = pybasic.correct_illumination(
             images_list=frames_as_arrays,
             flatfield=flatfield,
@@ -426,24 +441,31 @@ def pybasic_IC_target_frame_to_tiff(
             background_timelapse=baseflour,
         )
 
-        # convert corrected images to numpy array, normalize, and convert to uint8
+        print("[STEP] Normalizing corrected images...")
         brightfield_images_corrected = np.array(brightfield_images_corrected_original)
-        brightfield_images_corrected[brightfield_images_corrected < 0] = (
-            0  # make negatives 0
-        )
-        brightfield_images_corrected = brightfield_images_corrected / np.max(
-            brightfield_images_corrected
-        )  # normalize the data to 0 - 1
-        brightfield_images_corrected = (
-            255 * brightfield_images_corrected
-        )  # Now scale by 255
+        print(f"       Corrected movie shape: {brightfield_images_corrected.shape}")
+
+        # Ensure no negative values
+        negatives = np.sum(brightfield_images_corrected < 0)
+        if negatives > 0:
+            print(f"       Found {negatives} negative pixels — setting them to zero.")
+        brightfield_images_corrected[brightfield_images_corrected < 0] = 0
+
+        # Normalize and scale to uint8
+        max_val = np.max(brightfield_images_corrected)
+        print(f"       Maximum pixel value before normalization: {max_val}")
+        brightfield_images_corrected = brightfield_images_corrected / max_val
+        brightfield_images_corrected *= 255
         corrected_movie = brightfield_images_corrected.astype(np.uint8)
 
-        # export the target frame to file
+        print(f"[STEP] Saving corrected frame {target_frame} to {destination_filename}")
         skimage.io.imsave(fname=destination_filename, arr=corrected_movie[target_frame])
 
-        # return the filepath
-        return destination_filename
+    elapsed = time.time() - start_time
+    print(f"[DONE] Illumination correction completed in {elapsed:.2f} seconds.")
+    print(f"       Saved corrected frame to {destination_filename}\n")
+
+    return destination_filename
 
 
 def read_image_as_binary(image_path: str) -> bytes:
@@ -506,22 +528,24 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
         target_frame = int(row["Frames"][0])
 
         # loop through frames to extract them
-        frames_to_tiffs = {
-            # for each frame, extract a tiff from the ch5
-            str(frame): get_frame_tiff_from_idr_ch5(
-                # note: we zero index the frame for bfconvert
+        frames_to_tiffs = {}
+        for frame in get_ic_context_frames(target_frame=target_frame, movie_len=movie_length):
+            # construct the target TIFF path
+            local_frame_tif = pathlib.Path(image_download_dir) / row["DNA_dotted_notation"][0].replace(
+                f"_{target_frame}.tif", f"_{frame}.tif"
+            )
+
+            # skip extraction if TIFF already exists
+            if local_frame_tif.exists():
+                frames_to_tiffs[str(frame)] = local_frame_tif
+                continue
+
+            # otherwise, extract and save
+            frames_to_tiffs[str(frame)] = get_frame_tiff_from_idr_ch5(
                 frame=frame - 1,
                 local_ch5_file=local_ch5_file,
-                local_frame_tif=f"{image_download_dir}/"
-                    + row["DNA_dotted_notation"][0].replace(
-                        f"_{target_frame}.tif", f"_{frame}.tif"
-                    ),
+                local_frame_tif=str(local_frame_tif),
             )
-            # gather all frames based on a target frame
-            for frame in get_ic_context_frames(
-                target_frame=target_frame, movie_len=movie_length
-            )
-        }
 
         # read the tiffs as arrays for use with pybasic
         # and then add the IC image filepath as a new
@@ -579,7 +603,7 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
                 new_row = {
                     **base_row,
                     "Frames": str(frame_number),
-                    "DNA_dotted_notation": frame_tiff,
+                    "DNA_dotted_notation": str(frame_tiff),
                     "Frame_type": "IC_FRAME" if "_IC" not in frame_number else "IC_TARGET_FRAME",
                     "ome-arrow_original": ome_struct["ome-arrow_original"],
                 }
@@ -587,7 +611,7 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
                 new_row = {
                     **base_row,
                     "Frames": str(frame_number),
-                    "DNA_dotted_notation": frame_tiff,
+                    "DNA_dotted_notation": str(frame_tiff),
                     "Frame_type": "IC_FRAME" if "_IC" not in frame_number else "IC_TARGET_FRAME",
                     "ome-arrow_original": ome_struct["ome-arrow_original"],
                 }

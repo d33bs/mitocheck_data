@@ -328,6 +328,7 @@ def get_frame_tiff_from_idr_ch5(
             image_name="ome_bfconvert",
             volumes=[f"{os.getcwd()}:/app"],
             command=(
+                "-z 0"
                 f"-timepoint {frame} {local_ch5_file} {str(local_frame_tif)}"
                 " -overwrite"
             ),

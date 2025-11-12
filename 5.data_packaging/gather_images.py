@@ -373,13 +373,12 @@ def get_ic_context_frames(target_frame: int, movie_len: int) -> List[int]:
     # "sandwich" the frames using one frame before and one frame after
     # the target frame provided from frame_num.
     # note: we zero index the movie length here for comparisons.
-    if target_frame + 1 <= movie_len - 1:
-        return [target_frame - 1, target_frame, target_frame + 1]
-
-    # else if we have the first frame, use two frames after
-    elif target_frame == 0:
+    # if we have the first frame, use two frames after
+    if target_frame == 0:
         return [target_frame, target_frame + 1, target_frame + 2]
-
+    # if the target is the movie len
+    elif target_frame + 1 <= movie_len:
+        return [target_frame - 1, target_frame, target_frame + 1]
     # otherwise we have the last frame, so use two frames prior
     else:
         return [target_frame - 2, target_frame - 1, target_frame]

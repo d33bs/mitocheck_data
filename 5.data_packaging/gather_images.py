@@ -328,7 +328,7 @@ def get_frame_tiff_from_idr_ch5(
             image_name="ome_bfconvert",
             volumes=[f"{os.getcwd()}:/app"],
             command=(
-                "-z 0"
+                "-z 0 "
                 f"-timepoint {frame} {local_ch5_file} {str(local_frame_tif)}"
                 " -overwrite"
             ),
@@ -389,7 +389,7 @@ def get_ic_context_frames(target_frame: int, movie_len: int) -> List[int]:
 # from: https://github.com/WayScience/IDR_stream/blob/main/idrstream/preprocess.py#L114
 def pybasic_IC_target_frame_to_tiff(
     frames_as_arrays: List[np.ndarray], target_frame: int, destination_filename: str
-):
+) -> str:
     """
     PyBaSiC Illumination correction as described in:
     http://www.nature.com/articles/ncomms14836
@@ -551,6 +551,13 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
         # read the tiffs as arrays for use with pybasic
         # and then add the IC image filepath as a new
         # element along with the others
+
+        destination_filename = (
+                f"{image_download_dir}/"
+                + row["DNA_dotted_notation"][0].replace(
+                    f"_{target_frame}.tif", f"_{target_frame}_IC_TARGET.tif"
+                )
+            )
         frames_to_tiffs[f"{target_frame}_IC"] = pybasic_IC_target_frame_to_tiff(
             frames_as_arrays=[
                 skimage.io.imread(fname=tiff_file)
@@ -561,13 +568,8 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
                 for idx, frame in enumerate(frames_to_tiffs.keys())
                 if frame == str(target_frame)
             )[0],
-            destination_filename=(
-                f"{image_download_dir}/"
-                + row["DNA_dotted_notation"][0].replace(
-                    f"_{target_frame}.tif", f"_{target_frame}_IC_TARGET.tif"
-                )
-            ),
-        )
+            destination_filename=destination_filename,
+        ) if not pathlib.Path(destination_filename).is_file() else destination_filename
 
         # create record batches from the frames_to_tiffs
         pylist_rows = []  # switch to pylist; simpler than many small RecordBatches

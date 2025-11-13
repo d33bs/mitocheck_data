@@ -320,6 +320,10 @@ def get_frame_tiff_from_idr_ch5(
         f"tiff: {local_frame_tif}",
     )
 
+    # avoid negative frames
+    if frame < 0:
+        raise ValueError("Frame number must be greater than or equal to 0.")
+
     # if we don't already have a file, create it
     if not pathlib.Path(local_frame_tif).is_file():
         # extract a frame from the ch5 file using bfconvert through a docker container
@@ -369,6 +373,11 @@ def get_ic_context_frames(target_frame: int, movie_len: int) -> List[int]:
         >>> get_ic_context_frames(4, 5)
         [2, 3, 4]
     """
+
+    # We cannot have a negative frame number
+    # and this causes issues if received downstream.
+    if target_frame < 0:
+        raise ValueError("Frame number may not be negative.")
 
     # "sandwich" the frames using one frame before and one frame after
     # the target frame provided from frame_num.

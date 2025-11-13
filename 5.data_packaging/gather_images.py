@@ -542,7 +542,7 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
 
             # otherwise, extract and save
             frames_to_tiffs[str(frame)] = get_frame_tiff_from_idr_ch5(
-                frame=frame - 1,
+                frame=frame,
                 local_ch5_file=local_ch5_file,
                 local_frame_tif=str(local_frame_tif),
             )

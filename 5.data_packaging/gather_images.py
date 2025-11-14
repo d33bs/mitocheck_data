@@ -521,7 +521,7 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
         local_ch5_file = filename
 
     # find the movie length
-    movie_length = find_frame_len(ch5_file=local_ch5_file)
+    max_frame = find_frame_len(ch5_file=local_ch5_file) - 1
 
     # reference rows with the same ch5 file
     for batch in table.filter(
@@ -538,7 +538,7 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
 
         # loop through frames to extract them
         frames_to_tiffs = {}
-        for frame in get_ic_context_frames(target_frame=target_frame, movie_len=movie_length):
+        for frame in get_ic_context_frames(target_frame=target_frame, movie_len=max_frame):
             # construct the target TIFF path
             local_frame_tif = pathlib.Path(image_download_dir) / row["DNA_dotted_notation"][0].replace(
                 f"_{target_frame}.tif", f"_{frame}.tif"

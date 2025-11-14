@@ -345,52 +345,44 @@ def get_frame_tiff_from_idr_ch5(
 # https://github.com/WayScience/IDR_stream/blob/main/idrstream/preprocess.py#L194C1-L227C76
 def get_ic_context_frames(target_frame: int, movie_len: int) -> List[int]:
     """
-    Gather additional non-target frames for use with PyBasic IC.
+    Choose context frames around a target frame for PyBaSiC IC.
 
-    This function returns a list of three frames: one frame before the target frame,
-    the target frame itself, and one frame after the target frame. The frames are
-    0-indexed, while the movie length is not. If the target frame is the first frame
-    (0), it returns the target frame and the next two frames. If the target frame is
-    the last frame, it returns the target frame and the two preceding frames.
+    Semantics (0-based):
+    - If there are at least 2 frames *after* the target, use:
+        [target, target + 1, target + 2]
+    - Otherwise (near the end), use:
+        [target - 2, target - 1, target]
+    All indices are clamped to [0, movie_len - 1], and for very short
+    movies (< 3 frames) we just use all available frames.
 
     Args:
-        target_frame (int):
-            The index of the target frame (0-indexed).
-        movie_len (int):
-            The length of the movie (1-indexed).
+        target_idx: 0-based index of the target frame.
+        movie_len: Total number of frames in the movie.
 
     Returns:
-        List[int]:
-            A list of three frame indices for context.
-
-    Example:
-        >>> get_ic_context_frames(2, 5)
-        [1, 2, 3]
-
-        >>> get_ic_context_frames(0, 5)
-        [0, 1, 2]
-
-        >>> get_ic_context_frames(4, 5)
-        [2, 3, 4]
+        A list of context frame indices (length 1–3).
     """
+    if movie_len <= 0:
+        raise ValueError(f"movie_len must be positive, got {movie_len}")
 
-    # We cannot have a negative frame number
-    # and this causes issues if received downstream.
-    if target_frame < 0:
-        raise ValueError("Frame number may not be negative.")
+    last = movie_len - 1
 
-    # "sandwich" the frames using one frame before and one frame after
-    # the target frame provided from frame_num.
-    # note: we zero index the movie length here for comparisons.
-    # if we have the first frame, use two frames after
-    if target_frame == 0:
+    if not (0 <= target_frame <= last):
+        raise ValueError(
+            f"target_idx {target_frame} out of range for movie_len {movie_len}"
+        )
+
+    # Very short movies: just use what we have
+    if movie_len <= 3:
+        return list(range(movie_len))
+
+    # If we have at least 2 frames after the target, use target + 2 after
+    if target_frame + 2 <= last:
         return [target_frame, target_frame + 1, target_frame + 2]
-    # if the target is the movie len
-    elif target_frame + 1 <= movie_len:
-        return [target_frame - 1, target_frame, target_frame + 1]
-    # otherwise we have the last frame, so use two frames prior
-    else:
-        return [target_frame - 2, target_frame - 1, target_frame]
+
+    # Otherwise, we're near the end: use 2 before + target
+    start = max(last - 2, 0)  # ensure non-negative for very small movies
+    return [start, start + 1, last]
 
 
 # referenced with modifications
@@ -521,7 +513,7 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
         local_ch5_file = filename
 
     # find the movie length
-    max_frame = find_frame_len(ch5_file=local_ch5_file) - 1
+    movie_length = find_frame_len(ch5_file=local_ch5_file)
 
     # reference rows with the same ch5 file
     for batch in table.filter(
@@ -538,7 +530,7 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
 
         # loop through frames to extract them
         frames_to_tiffs = {}
-        for frame in get_ic_context_frames(target_frame=target_frame, movie_len=max_frame):
+        for frame in get_ic_context_frames(target_frame=target_frame, movie_len=movie_length):
             # construct the target TIFF path
             local_frame_tif = pathlib.Path(image_download_dir) / row["DNA_dotted_notation"][0].replace(
                 f"_{target_frame}.tif", f"_{frame}.tif"

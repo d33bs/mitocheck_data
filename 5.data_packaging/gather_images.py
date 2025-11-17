@@ -384,6 +384,29 @@ def get_ic_context_frames(target_frame: int, movie_len: int) -> List[int]:
     start = max(last - 2, 0)  # ensure non-negative for very small movies
     return [start, start + 1, last]
 
+def normalize_frame_label(frame_label: int, movie_len: int) -> int | None:
+    """
+    Normalize a raw frame label into a 0-based index for bfconvert.
+
+    Global rule (applies to all movies):
+    - frame_label < 0  → invalid, return None
+    - 0 <= frame_label < movie_len → treat as a valid 0-based index
+    - frame_label >= movie_len     → treat as 'last frame' (movie_len - 1)
+
+    Return:
+        0-based frame index, or None if we choose to skip it entirely.
+    """
+    if frame_label < 0:
+        # something is seriously wrong; skip
+        raise Exception("Detected a frame less than 0")
+
+    if frame_label >= movie_len:
+        # off-the-end; treat as last frame
+        return movie_len - 1
+
+    # already a valid 0-based index
+    return frame_label
+
 
 # referenced with modifications
 # from: https://github.com/WayScience/IDR_stream/blob/main/idrstream/preprocess.py#L114
@@ -526,7 +549,8 @@ for unique_file in pc.unique(table["IDR_FTP_ch5_location"]).to_pylist():
         row = batch.to_pydict()
 
         # reference a target frame as an integer
-        target_frame = int(row["Frames"][0])
+        # note: we correct the frame reference so it is zero-indexed for use with frame extraction below
+        target_frame = normalize_frame_label(frame_label=int(row["Frames"][0]), movie_len=movie_length)
 
         # loop through frames to extract them
         frames_to_tiffs = {}
